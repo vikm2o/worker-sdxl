@@ -53,6 +53,11 @@ INPUT_SCHEMA = {
         'required': False,
         'default': None
     },
+    'mask_url': {
+        'type': str,
+        'required': False,
+        'default': None
+    },
     'num_images': {
         'type': int,
         'required': False,

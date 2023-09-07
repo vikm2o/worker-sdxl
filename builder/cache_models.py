@@ -1,7 +1,7 @@
 # builder/model_fetcher.py
 
 import torch
-from diffusers import StableDiffusionXLPipeline, StableDiffusionXLImg2ImgPipeline
+from diffusers import StableDiffusionXLInpaintPipeline,StableDiffusionXLImg2ImgPipeline
 
 
 def fetch_pretrained_model(model_class, model_name, **kwargs):
@@ -30,8 +30,8 @@ def get_diffusion_pipelines():
         "use_safetensors": True
     }
 
-    pipe = fetch_pretrained_model(StableDiffusionXLPipeline,
-                                  "stabilityai/stable-diffusion-xl-base-1.0", **common_args)
+    pipe = fetch_pretrained_model(StableDiffusionXLInpaintPipeline,
+                                  "viktfb/sdxl-fashion-model", **common_args)
     refiner = fetch_pretrained_model(StableDiffusionXLImg2ImgPipeline,
                                      "stabilityai/stable-diffusion-xl-refiner-1.0", **common_args)
 

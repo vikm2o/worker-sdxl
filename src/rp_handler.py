@@ -5,8 +5,7 @@ Contains the handler function that will be called by the serverless.
 import os
 import torch
 import concurrent.futures
-from diffusers import StableDiffusionXLPipeline, StableDiffusionXLImg2ImgPipeline
-from diffusers.utils import load_image
+from diffusers import StableDiffusionXLInpaintPipeline,StableDiffusionXLImg2ImgPipeline
 
 from diffusers import (
     PNDMScheduler,
@@ -20,14 +19,15 @@ from diffusers import (
 import runpod
 from runpod.serverless.utils import rp_upload, rp_cleanup
 from runpod.serverless.utils.rp_validator import validate
-
+import base64
 from rp_schemas import INPUT_SCHEMA
-
+from io import BytesIO
+from PIL import Image
 
 # -------------------------------- Load Models ------------------------------- #
 def load_base():
-    base_pipe = StableDiffusionXLPipeline.from_pretrained(
-        "stabilityai/stable-diffusion-xl-base-1.0",
+    base_pipe = StableDiffusionXLInpaintPipeline.from_pretrained(
+        "viktfb/sdxl-fashion-model",
         torch_dtype=torch.float16, variant="fp16", use_safetensors=True, add_watermarker=False
     ).to("cuda")
     base_pipe.enable_xformers_memory_efficient_attention()
@@ -71,7 +71,7 @@ def make_scheduler(name, config):
         "KLMS": LMSDiscreteScheduler.from_config(config),
         "DDIM": DDIMScheduler.from_config(config),
         "K_EULER": EulerDiscreteScheduler.from_config(config),
-        # "K_EULER_ANCESTRAL": EulerAncestralDiscreteScheduler.from_config(config),
+        "K_EULER_ANCESTRAL": EulerAncestralDiscreteScheduler.from_config(config),
         "DPMSolverMultistep": DPMSolverMultistepScheduler.from_config(config),
     }[name]
 
@@ -90,8 +90,6 @@ def generate_image(job):
         return {"error": validated_input['errors']}
     job_input = validated_input['validated_input']
 
-    image_url = job_input['image_url']
-
     if job_input['seed'] is None:
         job_input['seed'] = int.from_bytes(os.urandom(2), "big")
 
@@ -99,38 +97,36 @@ def generate_image(job):
 
     base.scheduler = make_scheduler(job_input['scheduler'], base.scheduler.config)
 
-    if image_url:  # If image_url is provided, run only the refiner pipeline
-        init_image = load_image(image_url).convert("RGB")
-        output = refiner(
-            prompt=job_input['prompt'],
-            num_inference_steps=job_input['refiner_inference_steps'],
-            strength=job_input['strength'],
-            image=init_image,
-            generator=generator
-        ).images[0]
-    else:
-        # Generate latent image using pipe
-        image = base(
-            prompt=job_input['prompt'],
-            negative_prompt=job_input['negative_prompt'],
-            height=job_input['height'],
-            width=job_input['width'],
-            num_inference_steps=job_input['num_inference_steps'],
-            guidance_scale=job_input['guidance_scale'],
-            output_type="latent",
-            num_images_per_prompt=job_input['num_images'],
-            generator=generator
-        ).images
+    msg_old = base64.b64decode(job_input['image_url'])
+    init_img_old = Image.open(BytesIO(msg_old)).convert("RGB")
 
-        # Refine the image using refiner with refiner_inference_steps
-        output = refiner(
-            prompt=job_input['prompt'],
-            num_inference_steps=job_input['refiner_inference_steps'],
-            strength=job_input['strength'],
-            image=image,
-            num_images_per_prompt=job_input['num_images'],
-            generator=generator
-        ).images
+    msg_new = base64.b64decode(job_input['mask_url'])
+    init_img_new = Image.open(BytesIO(msg_new)).convert("RGB")
+    init_img_new = init_img_new[init_img_new > 0] = 255
+    
+    image = base(
+        prompt=job_input['prompt'],
+        negative_prompt=job_input['negative_prompt'],
+        height=job_input['height'],
+        width=job_input['width'],
+        num_inference_steps=job_input['num_inference_steps'],
+        guidance_scale=job_input['guidance_scale'],
+        output_type="latent",
+        image=init_img_old,
+        mask_image=init_img_new,
+        num_images_per_prompt=job_input['num_images'],
+        generator=generator
+    ).images
+
+    # Refine the image using refiner with refiner_inference_steps
+    output = refiner(
+        prompt=job_input['prompt'],
+        num_inference_steps=job_input['refiner_inference_steps'],
+        strength=job_input['strength'],
+        image=image,
+        num_images_per_prompt=job_input['num_images'],
+        generator=generator
+    ).images
 
     image_urls = _save_and_upload_images(output, job['id'])
 
